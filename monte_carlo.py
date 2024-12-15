@@ -1,5 +1,7 @@
 import numpy as np
 
+from tqdm.notebook import tqdm
+
 
 # モンテカルロシミュレーションのための補助関数
 def ratio_sigma(g_tau, l, sigma, x, x_l_prime, alpha):
@@ -60,8 +62,7 @@ def monte_carlo_sampling(g0_tau, U, delta_tau, n_tau, n_warmup=100, n_cycle=1000
         g_dn = g_dn_prime.copy()
 
     # ウォームアップ
-    for i in range(n_warmup):
-        print(f"n_warmup: {i}")
+    for i in tqdm(range(n_warmup), desc="Warmup"):
         for l in range(n_tau):
             x_l_prime = -x[l]
             r = ratio(g_up, g_dn, l, x, x_l_prime, alpha)
@@ -81,8 +82,7 @@ def monte_carlo_sampling(g0_tau, U, delta_tau, n_tau, n_warmup=100, n_cycle=1000
                 g_dn = g_dn_prime.copy()
 
     # モンテカルロサンプリング
-    for i in range(n_cycle):
-        print(f"n_cycle: {i}")
+    for i in tqdm(range(n_cycle), desc="Monte Carlo Sampling"):
         for l in range(n_tau):
             x_l_prime = -x[l]
             r = ratio(g_up, g_dn, l, x, x_l_prime, alpha)
