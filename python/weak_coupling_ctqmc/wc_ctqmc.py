@@ -79,18 +79,18 @@ def calculate_accept_ratio_insertion(S_up, S_dn, Q, R, M, n, U, beta):
     term_up = S_up - (R @ M["u"] @ Q)[0, 0]
     term_dn = S_dn - (R @ M["d"] @ Q)[0, 0]
     A_insert = -beta * U / (n + 1) * term_up * term_dn
-    print(
-        f"[DEBUG] A_insert (raw): {A_insert}  Re: {A_insert.real}, Im: {A_insert.imag}"
-    )
+    # print(
+    #    f"[DEBUG] A_insert (raw): {A_insert}  Re: {A_insert.real}, Im: {A_insert.imag}"
+    # )
     return np.abs(A_insert.real)
 
 
 def calculate_accept_ratio_removal(S_tilde_up, S_tilde_dn, n, U, beta):
     A_remove = -n / (beta * U) * S_tilde_up * S_tilde_dn
 
-    print(
-        f"[DEBUG] A_remove (raw): {A_remove}  Re: {A_remove.real}, Im: {A_remove.imag}"
-    )
+    # print(
+    #    f"[DEBUG] A_remove (raw): {A_remove}  Re: {A_remove.real}, Im: {A_remove.imag}"
+    # )
     return np.abs(A_remove.real)
 
 
