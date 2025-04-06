@@ -1,77 +1,42 @@
 import numpy as np
 
 
-def build_M_inv(C, g, beta, delta=1e-2):
-    """
-    スピンを考慮しないM_inv行列の構築。
-    C : list of tauのみ
-    g : g(tau)関数 (tau in [0,beta))
-    beta : float
-    delta : float (微小量)
-    """
+def alpha(s, sigma, delta=1e-2):
+    return 0.5 + sigma * s * (0.5 + delta)
+
+
+def build_M_inv(C, sigma, g, beta, eta=1e-2, delta=1e-2):
     n = len(C)
     if n == 0:
-        # n=0なら M_inv = [[1.0]]
         return np.array([[1.0]], dtype=complex)
 
-    taus = C  # tauのみのリスト
     M_inv = np.zeros((n, n), dtype=complex)
-
-    # スピン関係なしで全ての成分を計算
     for i in range(n):
         for j in range(n):
-            tau_diff = taus[i] - taus[j] - delta
+            tau_diff = C[i][0] - C[j][0] - eta
             if tau_diff < 0:
                 tau_diff += beta
             M_inv[i, j] = g(tau_diff)
-
+        M_inv[i, i] -= alpha(C[i][1], sigma, delta)
     return M_inv
 
 
-def build_S(g, beta, delta=1e-2):
-    return g(beta - delta)
+def build_S(g, s, sigma, beta, eta=1e-2, delta=1e-2):
+    return g(beta - eta) - alpha(s, sigma, delta)
 
 
 def build_Q(C, g, beta, tau):
-    """
-    スピンを考慮しないQ行列の構築。
-    C : list of tauのみ
-    g : g(tau)関数 (tau in [0,beta))
-    beta : float
-    """
-    n = len(C)
-    if n == 0:
-        #  error
-        raise ValueError("Q matrix is not defined for n=0")
-    else:
-        Q = np.zeros((n, 1), dtype=complex)
-        for i in range(n):
-            tau_diff = C[i] - tau
-            if tau_diff < 0:
-                tau_diff += beta
-            Q[i, 0] = g(tau_diff)
-        return Q
+    if len(C) == 0:
+        raise ValueError("Q is undefined for empty configuration")
+    Q = np.array([[g((c[0] - tau + beta) % beta)] for c in C], dtype=complex)
+    return Q
 
 
 def build_R(C, g, beta, tau):
-    """
-    スピンを考慮しないR行列の構築。
-    C : list of tauのみ
-    g : g(tau)関数 (tau in [0,beta))
-    beta : float
-    """
-    n = len(C)
-    if n == 0:
-        #  error
-        raise ValueError("R matrix is not defined for n=0")
-    else:
-        R = np.zeros((1, n), dtype=complex)
-        for i in range(n):
-            tau_diff = tau - C[i]
-            if tau_diff < 0:
-                tau_diff += beta
-            R[0, i] = g(tau_diff)
-        return R
+    if len(C) == 0:
+        raise ValueError("R is undefined for empty configuration")
+    R = np.array([[g((tau - c[0] + beta) % beta) for c in C]], dtype=complex)
+    return R
 
 
 def build_S_tilde(S, Q, R, M):
@@ -90,85 +55,75 @@ def build_P_tilde(S_tilde, R, Q, M):
     return M + S_tilde * M @ Q @ R @ M
 
 
-def calculate_accept_ratio_insertion(S, Q, R, M, n, U, beta):
-    # A_insert = -beta * U / (n + 1) * (S - (R @ M @ Q)[0, 0])
-    A_insert = -beta * U / (n + 1) * (S - (np.einsum("ik,kj,jl->il", R, M, Q))[0, 0])
-    return np.abs(A_insert.real)
-
-
-def calculate_accept_ratio_removal(S_tilde, n, U, beta):
-    A_remove = -n / (beta * U) * S_tilde
-    return np.abs(A_remove.real)
-
-
-def build_reduced_M(S_tilde, Q_tilde, R_tilde, P_tilde):
-    return P_tilde - Q_tilde @ R_tilde / S_tilde
-
-
 def build_insert_M(S, Q, R, M):
     S_tilde = build_S_tilde(S, Q, R, M)
     Q_tilde = build_Q_tilde(S_tilde, Q, M)
     R_tilde = build_R_tilde(S_tilde, R, M)
     P_tilde = build_P_tilde(S_tilde, R, Q, M)
-    uppper = np.hstack([P_tilde, Q_tilde])
-    lower = np.hstack([R_tilde, np.array([[S_tilde]])])
-    return np.vstack([uppper, lower])
+    return np.block([[P_tilde, Q_tilde], [R_tilde, np.array([[S_tilde]])]])
 
 
-def attempt_vertex_update(C, M, g0, U, beta):
-    """
-    C_up, C_dnはtauのみを含むリスト。
-    アップスピン挿入・除去 -> C_up操作
-    ダウンスピン挿入・除去 -> C_dn操作
-    """
+def build_reduced_M(S_tilde, Q_tilde, R_tilde, P_tilde):
+    return P_tilde - (Q_tilde @ R_tilde) / S_tilde
 
-    # 全スピン合わせた頂点数 n
-    n = len(C["u"]) + len(C["d"])
 
+def calculate_accept_ratio_insertion(S_up, S_dn, Q, R, M, n, U, beta):
+    term_up = S_up - (R @ M["u"] @ Q)[0, 0]
+    term_dn = S_dn - (R @ M["d"] @ Q)[0, 0]
+    A_insert = -beta * U / (n + 1) * term_up * term_dn
+    print(
+        f"[DEBUG] A_insert (raw): {A_insert}  Re: {A_insert.real}, Im: {A_insert.imag}"
+    )
+    return np.abs(A_insert.real)
+
+
+def calculate_accept_ratio_removal(S_tilde_up, S_tilde_dn, n, U, beta):
+    A_remove = -n / (beta * U) * S_tilde_up * S_tilde_dn
+
+    print(
+        f"[DEBUG] A_remove (raw): {A_remove}  Re: {A_remove.real}, Im: {A_remove.imag}"
+    )
+    return np.abs(A_remove.real)
+
+
+def attempt_vertex_update(C, M, g0, U, beta, delta=1e-2):
+    n = len(C)
     move_type = np.random.choice(["insert", "remove"])
-    s = np.random.choice(["u", "d"])
+    s = np.random.choice([1, -1])
+    tau_new = beta * np.random.rand()
+
     if move_type == "insert":
-        # 挿入
-        tau_new = beta * np.random.rand()
+        S_up = build_S(g0, s, 1, beta, delta)
+        S_dn = build_S(g0, s, -1, beta, delta)
 
-        if len(C[s]) == 0:
-            S = build_S(g0, beta)
-            A_insert = np.abs((-beta * U / (n + 1) * S).real)
+        if n == 0:
+            A_insert = np.abs((-beta * U * S_up * S_dn).real)
             if np.random.rand() < A_insert:
-                # 受理
-                C[s].append(tau_new)
-                M[s] = np.array([[1 / S]])
-                return C, M
-            else:
-                return C, M
+                C.append((tau_new, s))
+                M = {"u": np.array([[1 / S_up]]), "d": np.array([[1 / S_dn]])}
         else:
-            S = build_S(g0, beta)
-            Q = build_Q(C[s], g0, beta, tau_new)
-            R = build_R(C[s], g0, beta, tau_new)
-
-            A_insert = calculate_accept_ratio_insertion(S, Q, R, M[s], n, U, beta)
-
+            Q = build_Q(C, g0, beta, tau_new)
+            R = build_R(C, g0, beta, tau_new)
+            A_insert = calculate_accept_ratio_insertion(S_up, S_dn, Q, R, M, n, U, beta)
             if np.random.rand() < A_insert:
-                # 受理
-                C[s].append(tau_new)
-                M[s] = build_insert_M(S, Q, R, M[s])
-                return C, M
-            else:
-                return C, M
-    else:
-        if len(C[s]) == 0:
-            return C, M
-        else:
-            idx = np.random.randint(len(C[s]))
-            S_tilde = M[s][idx, idx]
-            A_remove = calculate_accept_ratio_removal(S_tilde, n, U, beta)
+                C.append((tau_new, s))
+                M["u"] = build_insert_M(S_up, Q, R, M["u"])
+                M["d"] = build_insert_M(S_dn, Q, R, M["d"])
+        return C, M
 
-            if np.random.rand() < A_remove:
-                P_tilde = np.delete(np.delete(M[s], idx, axis=0), idx, axis=1)
-                Q_tilde = np.delete(M[s][:, idx : idx + 1], idx, axis=0)
-                R_tilde = np.delete(M[s][idx : idx + 1, :], idx, axis=1)
-                M[s] = build_reduced_M(S_tilde, Q_tilde, R_tilde, P_tilde)
-                C[s].pop(idx)
-                return C, M
-            else:
-                return C, M
+    elif move_type == "remove" and n > 0:
+        idx = np.random.randint(n)
+        S_tilde_up = M["u"][idx, idx]
+        S_tilde_dn = M["d"][idx, idx]
+        A_remove = calculate_accept_ratio_removal(S_tilde_up, S_tilde_dn, n, U, beta)
+
+        if np.random.rand() < A_remove:
+            C.pop(idx)
+            for spin in ["u", "d"]:
+                P = np.delete(np.delete(M[spin], idx, axis=0), idx, axis=1)
+                Q = np.delete(M[spin][:, idx].reshape(-1, 1), idx, axis=0)
+                R = np.delete(M[spin][idx, :].reshape(1, -1), idx, axis=1)
+                M[spin] = build_reduced_M(M[spin][idx, idx], Q, R, P)
+        return C, M
+
+    return C, M
