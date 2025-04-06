@@ -1,3 +1,11 @@
+# Implementation of the weak-coupling continuous-time quantum Monte Carlo (CTQMC) algorithm.
+# This code is based on Chapter 8.4 of:
+# "Quantum Monte Carlo Methods: Algorithms for Lattice Models"
+# by J.E. Gubernatis, N. Kawashima, and P. Werner (Cambridge University Press, 2016).
+# The structure follows the interaction-expansion CTQMC with auxiliary field decomposition (Assaad-Lang method),
+# including the measurement of the Green's function as described in Section 8.4.3.
+
+
 import numpy as np
 
 
@@ -127,3 +135,42 @@ def attempt_vertex_update(C, M, g0, U, beta, delta=1e-2):
         return C, M
 
     return C, M
+
+
+def measure_green_function(C, M_sigma, g0, beta, ntau_bins):
+    """
+    補助場構成 C と M_sigma を使って S_sigma(tilde_tau) を bin に記録
+    """
+    S_bins = np.zeros(ntau_bins)
+    d_tau = beta / ntau_bins
+    taus = np.array([tau for tau, _ in C])
+
+    n = len(C)
+    for k in range(n):
+        tau_k = taus[k]
+        bin_index = int(tau_k / d_tau)
+        # sum over l of M[k,l] * g0(tau_l)
+        summation = sum(M_sigma[k, l] * g0(taus[l]) for l in range(n))
+        S_bins[bin_index] += summation.real
+
+    return S_bins
+
+
+def reconstruct_Gtau(g0, S_bins, beta, ntau_bins):
+    """
+    式 (8.47) に基づいて G(τ) を再構成する
+    """
+    d_tau = beta / ntau_bins
+    Gtau = np.zeros(ntau_bins)
+
+    for i in range(ntau_bins):
+        tau = i * d_tau
+        G0_tau = g0(tau)
+        conv = 0.0
+        for j in range(ntau_bins):
+            tau_tilde = j * d_tau
+            kernel = g0((tau - tau_tilde) % beta)
+            conv += kernel * S_bins[j] * d_tau
+        Gtau[i] = G0_tau - conv
+
+    return Gtau
